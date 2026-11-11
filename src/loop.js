@@ -18,6 +18,19 @@ const OUT_OF_TIME_REPLY =
   "Uncle took too long to check. Ask again, maybe simpler.";
 const EMPTY_REPLY = "Uncle blur already. Ask again?";
 
+// Questions the model must answer from live data, never from memory. On the
+// first round of such a turn, the matching tool call is forced.
+const FORCED_TOOLS = [
+  { pattern: /\b(bus|buses|bus stop|stop \d{5})\b/i, tool: "get_bus_arrivals" },
+];
+
+/** The tool_choice to send for this round, or undefined to let the model decide. */
+export function toolChoiceFor(message, round) {
+  if (round !== 0) return undefined;
+  const match = FORCED_TOOLS.find((f) => f.pattern.test(message));
+  return match ? { type: "function", function: { name: match.tool } } : undefined;
+}
+
 /** Thrown for problems the person running the app has to fix. */
 export class ConfigError extends Error {}
 
@@ -46,7 +59,7 @@ export async function runLoop(history, message, env, sessionId, options = {}) {
       return OUT_OF_TIME_REPLY;
     }
 
-    const assistant = await callModel(messages, env, session, baseUrl);
+    const assistant = await callModel(messages, env, session, baseUrl, toolChoiceFor(message, round));
     const toolCalls = Array.isArray(assistant.tool_calls)
       ? assistant.tool_calls
       : [];
@@ -101,7 +114,7 @@ function checkConfig(env) {
   }
 }
 
-async function callModel(messages, env, sessionId, baseUrl) {
+async function callModel(messages, env, sessionId, baseUrl, toolChoice) {
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -114,6 +127,7 @@ async function callModel(messages, env, sessionId, baseUrl) {
       model: LLM_MODEL,
       messages,
       tools: toolDefinitions,
+      ...(toolChoice ? { tool_choice: toolChoice } : {}),
       max_tokens: MAX_OUTPUT_TOKENS,
     }),
     signal: AbortSignal.timeout(LLM_TIMEOUT_MS),

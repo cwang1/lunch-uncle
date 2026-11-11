@@ -289,7 +289,22 @@ async function getBusArrivals({ stop_code, service }) {
   if (!res.ok) {
     return { error: `Bus API returned ${res.status}` };
   }
-  return formatBusArrivals(res.data, code, service);
+  const result = formatBusArrivals(res.data, code, service);
+
+  // A service missing from one nearby stop often stops across the road,
+  // so check the other stops near CT Hub 2 before giving up.
+  const nearby = NEARBY_BUS_STOPS.map((s) => s.code);
+  if (result.note && nearby.includes(code)) {
+    for (const other of nearby.filter((c) => c !== code)) {
+      const alt = await fetchJson(`${BUS_URL}?id=${other}`);
+      if (!alt.ok) continue;
+      const altResult = formatBusArrivals(alt.data, other, service);
+      if (altResult.services.length) {
+        return { ...altResult, note: `Not at ${code}; found at nearby stop ${other} instead.` };
+      }
+    }
+  }
+  return result;
 }
 
 /**

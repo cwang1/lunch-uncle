@@ -65,6 +65,28 @@
       return div;
     }
 
+    // Show Uncle's reply with **bold** rendered, without using innerHTML.
+    function setReply(div, text) {
+      div.replaceChildren();
+      for (const [i, part] of text.split(/\*\*(.+?)\*\*/g).entries()) {
+        if (!part) continue;
+        if (i % 2 === 1) {
+          const strong = document.createElement("strong");
+          strong.textContent = part;
+          div.appendChild(strong);
+        } else {
+          div.appendChild(document.createTextNode(part));
+        }
+      }
+    }
+
+    // Bring a finished reply into view, starting from its top so a long
+    // reply can be read from the beginning.
+    function revealReply(div) {
+      const top = div.offsetTop - chat.offsetTop - 48;
+      chat.scrollTo({ top: Math.min(top, chat.scrollHeight), behavior: "smooth" });
+    }
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const message = input.value.trim();
@@ -91,7 +113,7 @@
 
         const reply = typeof data?.reply === "string" ? data.reply.trim() : "";
         if (res.ok && reply) {
-          thinking.textContent = reply;
+          setReply(thinking, reply);
           history.push({ role: "user", content: message });
           history.push({ role: "assistant", content: reply });
         } else {
@@ -107,6 +129,7 @@
         thinking.classList.add("error");
         input.value = message;
       } finally {
+        revealReply(thinking);
         send.disabled = false;
         input.focus();
       }

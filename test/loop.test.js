@@ -1,6 +1,6 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { runLoop, parseArgs, ConfigError } from "../src/loop.js";
+import { runLoop, parseArgs, ConfigError, toolChoiceFor } from "../src/loop.js";
 import { executeTool } from "../src/tools.js";
 import { buildSystemPrompt } from "../src/prompt.js";
 
@@ -121,4 +121,25 @@ test("executeTool rejects a bad bus stop code without calling the API", async ()
   };
   const result = JSON.parse(await executeTool("get_bus_arrivals", { stop_code: "undefined" }, ENV));
   assert.match(result.error, /five-digit/);
+});
+
+test("bus questions force the bus tool on the first round only", () => {
+  const forced = { type: "function", function: { name: "get_bus_arrivals" } };
+  assert.deepEqual(toolChoiceFor("When is the next 107 bus?", 0), forced);
+  assert.deepEqual(toolChoiceFor("next bus at stop 07361", 0), forced);
+  assert.equal(toolChoiceFor("When is the next 107 bus?", 1), undefined);
+  assert.equal(toolChoiceFor("Where to eat lunch?", 0), undefined);
+});
+
+test("a forced tool_choice is sent to the model", async () => {
+  const choices = [];
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("chat/completions")) {
+      choices.push(JSON.parse(init.body).tool_choice);
+      return modelResponse({ role: "assistant", content: "ok" });
+    }
+    throw new Error("unexpected");
+  };
+  await runLoop([], "any bus coming?", ENV, "test-session");
+  assert.equal(choices[0].function.name, "get_bus_arrivals");
 });
