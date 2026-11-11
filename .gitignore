@@ -2,3 +2,5 @@ node_modules/
 .wrangler/
 .env
 .DS_Store
+.dev.vars
+.dev.vars.*

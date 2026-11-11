@@ -21,6 +21,7 @@
     }
     .uncle { background: var(--uncle); align-self: flex-start; border-bottom-left-radius: .25rem; }
     .you { background: var(--you); align-self: flex-end; border-bottom-right-radius: .25rem; }
+    .uncle.error { background: #fee2e2; }
     form { display: flex; gap: .5rem; padding: 1rem; background: #fff; border-top: 1px solid #e5e7eb; }
     input { flex: 1; padding: .6rem .9rem; font-size: 1rem; border: 1px solid #d1d5db; border-radius: .5rem; }
     button { padding: .6rem 1.2rem; font-size: 1rem; border: 0; border-radius: .5rem; background: var(--ink); color: #fff; cursor: pointer; }
@@ -33,10 +34,10 @@
     <p>Tell Uncle what you feel like eating. He is at CT Hub 2, Lavender.</p>
   </header>
 
-  <div id="chat"></div>
+  <div id="chat" role="log" aria-live="polite"></div>
 
   <form id="form">
-    <input id="input" placeholder="Uncle, where to eat?" autocomplete="off" autofocus>
+    <input id="input" placeholder="Uncle, where to eat?" autocomplete="off" autofocus maxlength="500" aria-label="Message to Uncle">
     <button id="send" type="submit">Send</button>
   </form>
 
@@ -47,7 +48,13 @@
     const send = document.getElementById("send");
 
     // Conversation so far, in the shape the /chat endpoint expects.
+    // Only successful exchanges are stored, and only the latest ones are sent.
     const history = [];
+    const MAX_HISTORY = 20;
+    const REQUEST_TIMEOUT_MS = 60_000;
+
+    // One id for the whole conversation, so the model provider can cache it.
+    const sessionId = crypto.randomUUID();
 
     function addBubble(role, text) {
       const div = document.createElement("div");
@@ -72,15 +79,33 @@
         const res = await fetch("/chat", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ history, message }),
+          body: JSON.stringify({ history: history.slice(-MAX_HISTORY), message, sessionId }),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
-        const data = await res.json();
-        const reply = data.reply ?? data.error ?? "No reply.";
-        thinking.textContent = reply;
-        history.push({ role: "user", content: message });
-        history.push({ role: "assistant", content: reply });
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          // Not JSON, e.g. a platform error page. Handled below.
+        }
+
+        const reply = typeof data?.reply === "string" ? data.reply.trim() : "";
+        if (res.ok && reply) {
+          thinking.textContent = reply;
+          history.push({ role: "user", content: message });
+          history.push({ role: "assistant", content: reply });
+        } else {
+          // Show the problem, but keep it out of history and let the user retry.
+          thinking.textContent = data?.error ?? `Uncle got problem (error ${res.status}). Try again.`;
+          thinking.classList.add("error");
+          input.value = message;
+        }
       } catch (err) {
-        thinking.textContent = "Cannot reach Uncle. Try again.";
+        thinking.textContent = err.name === "TimeoutError"
+          ? "Uncle took too long. Try again."
+          : "Cannot reach Uncle. Check your connection and try again.";
+        thinking.classList.add("error");
+        input.value = message;
       } finally {
         send.disabled = false;
         input.focus();
